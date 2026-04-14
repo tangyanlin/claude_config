@@ -1,0 +1,310 @@
+"""
+Trainer Module
+Train and evaluate models with proper metrics and logging
+"""
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from typing import Dict, List, Tuple, Optional
+from tqdm import tqdm
+import json
+from pathlib import Path
+
+
+class Trainer:
+    """Train and evaluate PyTorch models"""
+
+    def __init__(self,
+                 model: nn.Module,
+                 device: str = "auto",
+                 learning_rate: float = 0.0001,
+                 save_dir: str = "outputs"):
+        """
+        Initialize trainer
+
+        Args:
+            model: PyTorch model to train
+            device: Device to use for training
+            learning_rate: Initial learning rate
+            save_dir: Directory to save checkpoints and results
+        """
+        self.model = model
+        self.device = self._get_device(device)
+        self.model = self.model.to(self.device)
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Training state
+        self.learning_rate = learning_rate
+        self.optimizer = None
+        self.criterion = None
+        self.history = {
+            "train_loss": [],
+            "val_loss": [],
+            "epochs": []
+        }
+
+    def _get_device(self, device: str) -> str:
+        """Determine the best device"""
+        if device == "auto":
+            if torch.cuda.is_available():
+                return "cuda"
+            elif torch.backends.mps.is_available():
+                return "mps"
+            return "cpu"
+        return device
+
+    def setup_training(self,
+                      optimizer: str = "adam",
+                      learning_rate: Optional[float] = None,
+                      criterion: str = "cross_entropy"):
+        """
+        Setup optimizer and loss function
+
+        Args:
+            optimizer: Optimizer type ('adam', 'sgd')
+            learning_rate: Learning rate (uses default if None)
+            criterion: Loss function ('cross_entropy', 'mse')
+        """
+        if learning_rate is not None:
+            self.learning_rate = learning_rate
+
+        # Setup optimizer
+        if optimizer.lower() == "adam":
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        elif optimizer.lower() == "adamw":
+            self.optimizer = optim.AdamW(self.model.parameters(), lr=self.learning_rate)
+        elif optimizer.lower() == "sgd":
+            self.optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate, momentum=0.9)
+        else:
+            raise ValueError(f"Unsupported optimizer: {optimizer}")
+
+        # Setup loss function
+        if criterion.lower() == "cross_entropy":
+            self.criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore padding
+        elif criterion.lower() == "mse":
+            self.criterion = nn.MSELoss()
+        else:
+            raise ValueError(f"Unsupported criterion: {criterion}")
+
+    def train_epoch(self, train_loader: DataLoader) -> float:
+        """
+        Train for one epoch
+
+        Args:
+            train_loader: Training data loader
+
+        Returns:
+            Average training loss for the epoch
+        """
+        self.model.train()
+        total_loss = 0
+
+        progress_bar = tqdm(train_loader, desc="Training")
+
+        for batch_idx, (src, tgt) in enumerate(progress_bar):
+            # Move to device
+            src, tgt = src.to(self.device), tgt.to(self.device)
+
+            # Forward pass
+            self.optimizer.zero_grad()
+
+            # For transformer, we need src and tgt
+            # Adjust tgt for teacher forcing (use all except last for input, all except first for target)
+            tgt_input = tgt[:, :-1]
+            tgt_output = tgt[:, 1:]
+
+            try:
+                output = self.model(src, tgt_input)
+
+                # Reshape for loss calculation
+                output = output.contiguous().view(-1, output.size(-1))
+                tgt_output = tgt_output.contiguous().view(-1)
+
+                # Calculate loss
+                loss = self.criterion(output, tgt_output)
+
+                # Backward pass
+                loss.backward()
+
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
+                self.optimizer.step()
+
+                # Update metrics
+                total_loss += loss.item()
+
+                # Update progress bar
+                progress_bar.set_postfix({'loss': f'{loss.item():.4f}'})
+
+            except Exception as e:
+                print(f"\nError in batch {batch_idx}: {e}")
+                continue
+
+        return total_loss / len(train_loader)
+
+    def validate(self, val_loader: DataLoader) -> float:
+        """
+        Validate the model
+
+        Args:
+            val_loader: Validation data loader
+
+        Returns:
+            Average validation loss
+        """
+        self.model.eval()
+        total_loss = 0
+
+        with torch.no_grad():
+            for src, tgt in tqdm(val_loader, desc="Validating"):
+                src, tgt = src.to(self.device), tgt.to(self.device)
+
+                try:
+                    tgt_input = tgt[:, :-1]
+                    tgt_output = tgt[:, 1:]
+
+                    output = self.model(src, tgt_input)
+
+                    output = output.contiguous().view(-1, output.size(-1))
+                    tgt_output = tgt_output.contiguous().view(-1)
+
+                    loss = self.criterion(output, tgt_output)
+                    total_loss += loss.item()
+
+                except Exception as e:
+                    print(f"\nError in validation: {e}")
+                    continue
+
+        return total_loss / len(val_loader)
+
+    def train(self,
+              train_loader: DataLoader,
+              val_loader: DataLoader,
+              num_epochs: int = 10,
+              eval_interval: int = 1) -> Dict[str, List]:
+        """
+        Train the model for multiple epochs
+
+        Args:
+            train_loader: Training data loader
+            val_loader: Validation data loader
+            num_epochs: Number of epochs to train
+            eval_interval: Evaluate every N epochs
+
+        Returns:
+            Training history dictionary
+        """
+        best_val_loss = float('inf')
+
+        print(f"Starting training on {self.device.upper()}...")
+        print(f"Model parameters: {sum(p.numel() for p in self.model.parameters() if p.requires_grad):,}")
+
+        for epoch in range(num_epochs):
+            print(f"\nEpoch {epoch + 1}/{num_epochs}")
+            print("-" * 50)
+
+            # Training
+            train_loss = self.train_epoch(train_loader)
+            self.history["train_loss"].append(train_loss)
+            print(f"Training Loss: {train_loss:.4f}")
+
+            # Validation
+            if (epoch + 1) % eval_interval == 0:
+                val_loss = self.validate(val_loader)
+                self.history["val_loss"].append(val_loss)
+                self.history["epochs"].append(epoch + 1)
+                print(f"Validation Loss: {val_loss:.4f}")
+
+                # Save best model
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    self.save_checkpoint(epoch + 1, val_loss, is_best=True)
+                    print(f"✓ New best model saved (val_loss: {val_loss:.4f})")
+
+                # Save checkpoint
+                self.save_checkpoint(epoch + 1, val_loss)
+
+        # Save final history
+        self.save_history()
+
+        print(f"\nTraining completed!")
+        print(f"Best validation loss: {best_val_loss:.4f}")
+
+        return self.history
+
+    def save_checkpoint(self, epoch: int, val_loss: float, is_best: bool = False):
+        """
+        Save model checkpoint
+
+        Args:
+            epoch: Current epoch number
+            val_loss: Current validation loss
+            is_best: Whether this is the best model so far
+        """
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'val_loss': val_loss,
+            'history': self.history,
+        }
+
+        # Save regular checkpoint
+        checkpoint_path = self.save_dir / f"checkpoint_epoch_{epoch}.pt"
+        torch.save(checkpoint, checkpoint_path)
+
+        # Save best model
+        if is_best:
+            best_path = self.save_dir / "best_model.pt"
+            torch.save(self.model.state_dict(), best_path)
+
+    def save_history(self):
+        """Save training history to JSON file"""
+        history_path = self.save_dir / "training_history.json"
+        with open(history_path, 'w') as f:
+            json.dump(self.history, f, indent=2)
+
+    def load_checkpoint(self, checkpoint_path: str):
+        """
+        Load model checkpoint
+
+        Args:
+            checkpoint_path: Path to checkpoint file
+        """
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.history = checkpoint['history']
+        print(f"Checkpoint loaded from epoch {checkpoint['epoch']}")
+
+    def quick_test(self, train_loader: DataLoader, val_loader: DataLoader) -> bool:
+        """
+        Run a quick test to verify model works
+
+        Args:
+            train_loader: Training data loader
+            val_loader: Validation data loader
+
+        Returns:
+            True if test passes, False otherwise
+        """
+        print("Running quick test...")
+
+        try:
+            # Train for 1 epoch
+            train_loss = self.train_epoch(train_loader)
+            print(f"Quick test - Train loss: {train_loss:.4f}")
+
+            # Validate
+            val_loss = self.validate(val_loader)
+            print(f"Quick test - Val loss: {val_loss:.4f}")
+
+            print("✓ Quick test passed!")
+            return True
+
+        except Exception as e:
+            print(f"✗ Quick test failed: {e}")
+            return False

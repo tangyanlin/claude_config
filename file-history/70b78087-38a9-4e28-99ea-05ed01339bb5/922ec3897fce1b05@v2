@@ -1,0 +1,165 @@
+"""
+PDF Parser Module
+Extract text and sections from ML paper PDFs
+"""
+import fitz  # PyMuPDF
+from typing import Dict, List, Optional
+import re
+
+
+class PDFParser:
+    """Parse PDF and extract structured content"""
+
+    def __init__(self, pdf_path: str):
+        """
+        Initialize PDF parser
+
+        Args:
+            pdf_path: Path to the PDF file
+        """
+        self.pdf_path = pdf_path
+        self.doc = None
+
+    def __enter__(self):
+        """Context manager entry"""
+        self.doc = fitz.open(self.pdf_path)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit"""
+        if self.doc:
+            self.doc.close()
+
+    def extract_full_text(self) -> str:
+        """
+        Extract all text from the PDF
+
+        Returns:
+            Full text content of the PDF
+        """
+        if not self.doc:
+            raise RuntimeError("PDF document not opened. Use with context manager.")
+
+        full_text = []
+        for page_num in range(len(self.doc)):
+            page = self.doc.load_page(page_num)
+            text = page.get_text()
+            full_text.append(text)
+
+        return "\n\n".join(full_text)
+
+    def extract_sections(self, text: str) -> Dict[str, str]:
+        """
+        Extract key sections from paper text
+
+        Args:
+            text: Full text content of the paper
+
+        Returns:
+            Dictionary mapping section names to their content
+        """
+        sections = {}
+
+        # Common section patterns in ML papers
+        section_patterns = {
+            "abstract": r"Abstract\s*\n(.*?)(?=\n\s*1\.|Introduction|\n\s*\n)",
+            "introduction": r"1\.\s*Introduction\s*\n(.*?)(?=\n\s*2\.|Related Work|Background)",
+            "method": r"(Method|Approach|Model)\s*\n(.*?)(?=\n\s*\d+\.|Experiments|Architecture)",
+            "architecture": r"Architecture\s*\n(.*?)(?=\n\s*\d+\.|Experiments|Training)",
+            "experiments": r"Experiments\s*\n(.*?)(?=\n\s*\d+\.|Conclusion|Results)",
+            "results": r"Results\s*\n(.*?)(?=\n\s*\d+\.|Conclusion|Discussion)",
+            "conclusion": r"Conclusion\s*\n(.*?)(?=\n\s*References|\Z)",
+        }
+
+        for section_name, pattern in section_patterns.items():
+            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+            if match:
+                # Get the last group if multiple groups exist
+                content = match.groups()[-1] if len(match.groups()) > 0 else match.group(0)
+                sections[section_name] = content.strip()
+
+        # If we didn't find specific sections, try to extract all content
+        if not sections:
+            sections["full_text"] = text
+
+        return sections
+
+    def extract_key_information(self, text: str) -> Dict[str, str]:
+        """
+        Extract specific information relevant for model implementation
+
+        Args:
+            text: Paper text
+
+        Returns:
+            Dictionary with key implementation details
+        """
+        key_info = {}
+
+        # Extract model architecture keywords
+        architecture_keywords = [
+            "Transformer", "Attention", "Encoder", "Decoder",
+            "Multi-head", "Self-attention", "Feed-forward"
+        ]
+
+        # Find sentences containing architecture keywords
+        sentences = text.split(".")
+        architecture_text = []
+        for sentence in sentences:
+            if any(keyword.lower() in sentence.lower() for keyword in architecture_keywords):
+                architecture_text.append(sentence.strip())
+
+        key_info["architecture_descriptions"] = " ".join(architecture_text[:10])  # Limit to first 10
+
+        # Extract hyperparameters
+        hyperparameter_patterns = {
+            "learning_rate": r"learning rate[:\s]+([\d.e\-]+)",
+            "batch_size": r"batch size[:\s]+(\d+)",
+            "hidden_size": r"hidden (size|dimension)[:\s]+(\d+)",
+            "num_layers": r"(\d+)\s+layers?",
+            "num_heads": r"(\d+)\s+heads?",
+            "dropout": r"dropout[:\s]+([\d.]+)",
+        }
+
+        for param_name, pattern in hyperparameter_patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                # Get the last group (the actual number)
+                key_info[param_name] = match.groups()[-1]
+
+        return key_info
+
+    def parse(self) -> Dict[str, any]:
+        """
+        Main method to parse PDF and return structured content
+
+        Returns:
+            Dictionary containing:
+            - full_text: Complete text
+            - sections: Key sections extracted
+            - key_info: Important implementation details
+        """
+        full_text = self.extract_full_text()
+        sections = self.extract_sections(full_text)
+        key_info = self.extract_key_information(full_text)
+
+        return {
+            "full_text": full_text,
+            "sections": sections,
+            "key_info": key_info,
+            "num_pages": len(self.doc) if self.doc else 0,
+        }
+
+
+def parse_pdf(pdf_path: str) -> Dict[str, any]:
+    """
+    Convenience function to parse a PDF
+
+    Args:
+        pdf_path: Path to the PDF file
+
+    Returns:
+        Parsed content dictionary
+    """
+    with PDFParser(pdf_path) as parser:
+        return parser.parse()

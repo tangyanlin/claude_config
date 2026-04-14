@@ -1,0 +1,1 @@
+{"timestamp": "2026-04-14T11:40:29Z", "event": "tool_start", "tool": "Bash", "session": "2823aca7-6888-4a55-8dce-8031d0c37837", "project_id": "5233b7c0a64e", "project_name": "test", "input": "{\"command\": \"ls -la ~/.claude/ | head -20\", \"description\": \"\\u67e5\\u770bClaude\\u914d\\u7f6e\\u76ee\\u5f55\\u7ed3\\u6784\"}"}

@@ -1,0 +1,338 @@
+"""
+Code Generator Module
+Use Claude API to generate implementation code from paper analysis
+"""
+from anthropic import Anthropic
+from typing import Dict, Optional
+import re
+import json
+
+
+class CodeGenerator:
+    """Generate implementation code using Claude API"""
+
+    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-20241022"):
+        """
+        Initialize code generator
+
+        Args:
+            api_key: Anthropic API key
+            model: Claude model to use
+        """
+        self.client = Anthropic(api_key=api_key)
+        self.model = model
+
+    def generate_model_code(self, analysis: Dict[str, any], framework: str = "pytorch") -> str:
+        """
+        Generate complete model implementation code
+
+        Args:
+            analysis: Paper analysis results
+            framework: Target framework (pytorch)
+
+        Returns:
+            Generated Python code string
+        """
+        architecture_desc = analysis.get("architecture_description", "")
+        hyperparams = analysis.get("hyperparameters", {})
+        analysis_text = analysis.get("full_analysis_text", "")
+
+        prompt = f"""
+You are an expert machine learning implementation engineer. Generate complete, production-ready PyTorch code to implement the model described in the following analysis.
+
+Analysis:
+{analysis_text[:8000]}  # Limit to avoid token limits
+
+Hyperparameters extracted:
+{json.dumps(hyperparams, indent=2)}
+
+Requirements for the generated code:
+
+1. Complete Implementation:
+   - Implement all model components (Attention, FeedForward, LayerNorm, Encoder, Decoder, etc.)
+   - Use proper PyTorch best practices
+   - Include type hints and docstrings
+   - Make it modular and reusable
+
+2. Model Architecture:
+   - Implement the exact architecture described in the paper
+   - Use the extracted hyperparameters as default values
+   - Include positional encoding
+   - Multi-head attention mechanism
+   - Encoder-decoder architecture (if applicable)
+
+3. Code Quality:
+   - Clean, readable code with proper names
+   - Efficient implementation (vectorized operations)
+   - Include forward pass documentation
+   - Handle device placement (CPU/GPU) properly
+
+4. Testing:
+   - Include a simple test function that verifies the model can be instantiated and run a forward pass
+   - Test with different input shapes
+
+Please provide the complete Python code in a single code block. Do not add any explanations outside the code block. The code should be ready to run directly.
+"""
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=8192,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+
+            code_text = response.content[0].text
+
+            # Extract code block
+            code = self._extract_code_block(code_text)
+
+            if code:
+                return code
+            else:
+                return code_text
+
+        except Exception as e:
+            print(f"Error generating model code: {e}")
+            return self._generate_fallback_code(hyperparams)
+
+    def generate_training_code(self, analysis: Dict[str, any]) -> str:
+        """
+        Generate training loop and evaluation code
+
+        Args:
+            analysis: Paper analysis results
+
+        Returns:
+            Generated training code string
+        """
+        hyperparams = analysis.get("hyperparameters", {})
+        analysis_text = analysis.get("full_analysis_text", "")
+
+        prompt = f"""
+Generate complete training and evaluation code for the model.
+
+Based on this analysis:
+{analysis_text[:6000]}
+
+Hyperparameters:
+{json.dumps(hyperparams, indent=2)}
+
+Training code requirements:
+
+1. Training Loop:
+   - Implement complete training loop with proper forward/backward pass
+   - Include both training and validation phases
+   - Track and display loss metrics
+   - Save best model checkpoint
+   - Implement learning rate scheduling if mentioned
+
+2. Optimizer and Loss:
+   - Use appropriate optimizer (Adam is typical for Transformers)
+   - Implement proper loss function
+   - Include gradient clipping if applicable
+
+3. Evaluation:
+   - Implement evaluation loop
+   - Calculate and display metrics
+   - Save evaluation results
+
+4. Best Practices:
+   - Use torch.no_grad() for validation
+   - Proper device management
+   - Progress bar with tqdm
+   - Logging and checkpointing
+
+Please provide complete Python training code that can be used directly with the model code. Include the training function and evaluation function.
+"""
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=6144,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+
+            code_text = response.content[0].text
+            code = self._extract_code_block(code_text)
+
+            return code if code else code_text
+
+        except Exception as e:
+            print(f"Error generating training code: {e}")
+            return self._generate_fallback_training_code(hyperparams)
+
+    def _extract_code_block(self, text: str) -> Optional[str]:
+        """
+        Extract Python code block from text
+
+        Args:
+            text: Text containing code
+
+        Returns:
+            Extracted code or None
+        """
+        # Try to find python code block
+        python_match = re.search(r"```python\n(.*?)\n```", text, re.DOTALL)
+        if python_match:
+            return python_match.group(1)
+
+        # Try to find generic code block
+        generic_match = re.search(r"```\n(.*?)\n```", text, re.DOTALL)
+        if generic_match:
+            return generic_match.group(1)
+
+        return None
+
+    def _generate_fallback_code(self, hyperparams: Dict[str, any]) -> str:
+        """Generate basic fallback code if API fails"""
+        return '''
+import torch
+import torch.nn as nn
+import math
+
+class TransformerModel(nn.Module):
+    def __init__(self,
+                 vocab_size: int = 10000,
+                 d_model: int = 512,
+                 nhead: int = 8,
+                 num_encoder_layers: int = 6,
+                 num_decoder_layers: int = 6,
+                 dim_feedforward: int = 2048,
+                 dropout: float = 0.1):
+        super().__init__()
+        self.d_model = d_model
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, dropout)
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_encoder_layers)
+
+        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout)
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_decoder_layers)
+
+        self.fc_out = nn.Linear(d_model, vocab_size)
+
+    def forward(self, src, tgt):
+        src = self.embedding(src) * math.sqrt(self.d_model)
+        src = self.pos_encoder(src)
+
+        tgt = self.embedding(tgt) * math.sqrt(self.d_model)
+        tgt = self.pos_encoder(tgt)
+
+        memory = self.transformer_encoder(src)
+        output = self.transformer_decoder(tgt, memory)
+        output = self.fc_out(output)
+
+        return output
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        super().__init__()
+        self.dropout = nn.Dropout(dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+'''
+
+    def _generate_fallback_training_code(self, hyperparams: Dict[str, any]) -> str:
+        """Generate basic fallback training code if API fails"""
+        return '''
+import torch
+import torch.optim as optim
+from tqdm import tqdm
+
+def train_step(model, src, tgt, optimizer, criterion, device):
+    model.train()
+    optimizer.zero_grad()
+
+    output = model(src, tgt)
+
+    # Shift output for loss calculation
+    output = output.view(-1, output.size(-1))
+    tgt_flat = tgt[1:].contiguous().view(-1)  # Remove first token
+
+    loss = criterion(output, tgt_flat)
+    loss.backward()
+
+    # Gradient clipping
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+    optimizer.step()
+    return loss.item()
+
+def evaluate(model, src, tgt, criterion, device):
+    model.eval()
+    with torch.no_grad():
+        output = model(src, tgt)
+        output = output.view(-1, output.size(-1))
+        tgt_flat = tgt[1:].contiguous().view(-1)
+        loss = criterion(output, tgt_flat)
+    return loss.item()
+
+def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, device='cuda'):
+    model = model.to(device)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    criterion = nn.CrossEntropyLoss(ignore_index=0)
+
+    best_val_loss = float('inf')
+    train_losses = []
+    val_losses = []
+
+    for epoch in range(num_epochs):
+        # Training
+        model.train()
+        epoch_loss = 0
+        progress_bar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}')
+
+        for batch_idx, (src, tgt) in enumerate(progress_bar):
+            src, tgt = src.to(device), tgt.to(device)
+            loss = train_step(model, src, tgt, optimizer, criterion, device)
+            epoch_loss += loss
+
+            progress_bar.set_postfix({'loss': f'{loss:.4f}'})
+
+        avg_train_loss = epoch_loss / len(train_loader)
+        train_losses.append(avg_train_loss)
+
+        # Validation
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for src, tgt in val_loader:
+                src, tgt = src.to(device), tgt.to(device)
+                loss = evaluate(model, src, tgt, criterion, device)
+                val_loss += loss
+
+        avg_val_loss = val_loss / len(val_loader)
+        val_losses.append(avg_val_loss)
+
+        print(f'Epoch {epoch+1}: Train Loss = {avg_train_loss:.4f}, Val Loss = {avg_val_loss:.4f}')
+
+        # Save best model
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            torch.save(model.state_dict(), 'best_model.pt')
+
+    return train_losses, val_losses
+'''
+
+import json  # Need to import at module level

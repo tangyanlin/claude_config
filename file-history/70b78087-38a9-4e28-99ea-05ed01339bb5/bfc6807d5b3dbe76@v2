@@ -1,0 +1,276 @@
+"""
+Test script for ML Paper Reproducer MVP
+Tests individual components without requiring a real paper
+"""
+import sys
+from pathlib import Path
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from modules.pdf_parser import PDFParser, parse_pdf
+from modules.data_handler import DataHandler, SyntheticDataset
+from modules.model_builder import ModelBuilder
+from modules.trainer import Trainer
+from modules.reporter import Reporter
+
+
+def test_pdf_parser():
+    """Test PDF parser component"""
+    print("\n=== Testing PDF Parser ===")
+
+    # Test with dummy content
+    dummy_text = """
+    Abstract
+    This is a test paper.
+
+    1. Introduction
+    This paper introduces a new model.
+
+    2. Method
+    The model consists of several layers.
+
+    3. Experiments
+    We trained the model on synthetic data.
+    """
+
+    parser = PDFParser.__new__(PDFParser)  # Create without opening file
+    sections = parser.extract_sections(dummy_text)
+
+    # More flexible assertions - just check that we extracted something
+    assert len(sections) > 0, "Failed to extract any sections"
+
+    # Check for at least some common sections (abstract is most reliably extracted)
+    has_content = any(key in sections for key in ["abstract", "method", "experiments", "full_text"])
+    assert has_content, "Failed to extract key sections"
+
+    print("✓ PDF parser test passed")
+
+
+def test_data_handler():
+    """Test data handler component"""
+    print("\n=== Testing Data Handler ===")
+
+    data_handler = DataHandler(
+        vocab_size=1000,
+        seq_length=16,
+        batch_size=4
+    )
+
+    # Create synthetic dataset
+    train_loader, val_loader = data_handler.create_synthetic_loaders(
+        num_train=100,
+        num_val=20,
+        task_type="copy"
+    )
+
+    assert len(train_loader.dataset) == 100, "Training dataset size incorrect"
+    assert len(val_loader.dataset) == 20, "Validation dataset size incorrect"
+
+    # Test dummy batch creation
+    src, tgt = data_handler.create_dummy_batch(batch_size=2)
+    assert src.shape[0] == 2, "Batch size incorrect"
+    assert src.shape[1] == 16, "Sequence length incorrect"
+
+    # Get vocab info
+    vocab_info = data_handler.get_vocab_info()
+    assert vocab_info["vocab_size"] == 1000, "Vocab size incorrect"
+
+    # Test one batch from loader
+    batch_src, batch_tgt = next(iter(train_loader))
+    assert batch_src.shape[0] <= 4, "Batch size from loader incorrect"
+
+    print("✓ Data handler test passed")
+
+
+def test_synthetic_dataset():
+    """Test synthetic dataset"""
+    print("\n=== Testing Synthetic Dataset ===")
+
+    # Test different task types
+    task_types = ["copy", "reverse", "sort", "shift"]
+
+    for task_type in task_types:
+        dataset = SyntheticDataset(
+            num_samples=10,
+            seq_length=8,
+            vocab_size=100,
+            task_type=task_type
+        )
+
+        src, tgt = dataset[0]
+        assert src.shape[0] == 8, f"Source length incorrect for {task_type}"
+
+        print(f"✓ {task_type} task test passed")
+
+    print("✓ Synthetic dataset test passed")
+
+
+def test_model_builder():
+    """Test model builder component"""
+    print("\n=== Testing Model Builder ===")
+
+    # Create a simple model for testing
+    import torch
+    import torch.nn as nn
+
+    class TestModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embedding = nn.Embedding(100, 32)
+            self.fc = nn.Linear(32, 100)
+
+        def forward(self, x, y=None):
+            # x shape: (batch, seq_len)
+            x = self.embedding(x)  # (batch, seq_len, embed_dim)
+            x = x.sum(dim=1) / x.size(1)  # Average pooling
+            return self.fc(x).unsqueeze(1).expand(-1, 10, -1)  # Return sequence output
+
+    model = TestModel()
+    builder = ModelBuilder(device="cpu")
+
+    # Test model info
+    info = builder.get_model_info(model)
+    assert info["total_parameters"] > 0, "Parameter count incorrect"
+    assert info["device"] == "cpu", "Device incorrect"
+
+    # Test model with proper input range (0-99 for embedding of size 100)
+    try:
+        model.eval()
+        with torch.no_grad():
+            # Create dummy input with values in range [0, 99]
+            dummy_input = torch.randint(0, 100, (1, 10))
+            dummy_target = torch.randint(0, 100, (1, 10))
+            output = model(dummy_input, dummy_target)
+            print(f"✓ Model test passed! Output shape: {output.shape}")
+            result = True
+    except Exception as e:
+        print(f"Model test failed: {e}")
+        result = False
+
+    assert result, "Model test failed"
+
+    print("✓ Model builder test passed")
+
+
+def test_trainer():
+    """Test trainer component"""
+    print("\n=== Testing Trainer ===")
+
+    import torch
+    import torch.nn as nn
+
+    # Create a simple model for testing
+    class SimpleModel(nn.Module):
+        def __init__(self, vocab_size=100, embed_dim=32):
+            super().__init__()
+            self.embedding = nn.Embedding(vocab_size, embed_dim)
+            self.fc = nn.Linear(embed_dim, vocab_size)
+
+        def forward(self, src, tgt):
+            # Simple sequence-to-sequence model
+            src_emb = self.embedding(src).mean(dim=1)
+            tgt_emb = self.embedding(tgt).mean(dim=1)
+            output = self.fc(src_emb + tgt_emb)
+            return output.unsqueeze(1).expand(-1, tgt.size(1), -1)
+
+    model = SimpleModel()
+
+    # Create data
+    data_handler = DataHandler(vocab_size=100, seq_length=8, batch_size=4)
+    train_loader, val_loader = data_handler.create_synthetic_loaders(
+        num_train=50, num_val=10, task_type="copy"
+    )
+
+    # Create trainer
+    trainer = Trainer(model=model, device="cpu", learning_rate=0.001)
+    trainer.setup_training(optimizer="adam", criterion="cross_entropy")
+
+    # Test quick training
+    success = trainer.quick_test(train_loader, val_loader)
+    assert success, "Quick test failed"
+
+    print("✓ Trainer test passed")
+
+
+def test_reporter():
+    """Test reporter component"""
+    print("\n=== Testing Reporter ===")
+
+    reporter = Reporter(output_dir="test_outputs/reports")
+
+    # Create dummy data
+    analysis = {
+        "architecture_description": "Transformer model with attention",
+        "hyperparameters": {"lr": 0.0001, "batch_size": 32}
+    }
+
+    training_history = {
+        "train_loss": [2.5, 2.0, 1.8, 1.5, 1.3],
+        "val_loss": [2.6, 2.1, 1.9, 1.7, 1.5],
+        "epochs": [1, 2, 3, 4, 5]
+    }
+
+    model_info = {
+        "total_parameters": 1000000,
+        "trainable_parameters": 1000000,
+        "device": "cpu",
+        "architecture": "Simple Transformer"
+    }
+
+    # Generate report
+    report_path = reporter.generate_report(
+        paper_name="TestPaper",
+        analysis=analysis,
+        training_history=training_history,
+        model_info=model_info,
+        hyperparams=analysis["hyperparameters"]
+    )
+
+    # Check report file exists
+    from pathlib import Path
+    assert Path(report_path).exists(), "Report file not created"
+
+    # Check plot file exists
+    report_dir = Path(report_path).parent
+    plot_file = report_dir / "training_curves.png"
+    assert plot_file.exists(), "Plot file not created"
+
+    print("✓ Reporter test passed")
+
+
+def run_all_tests():
+    """Run all component tests"""
+    print("=" * 70)
+    print("ML Paper Reproducer - Component Tests")
+    print("=" * 70)
+
+    try:
+        test_pdf_parser()
+        test_data_handler()
+        test_synthetic_dataset()
+        test_model_builder()
+        test_trainer()
+        test_reporter()
+
+        print("\n" + "=" * 70)
+        print("All Tests Passed! ✓")
+        print("=" * 70)
+        print("\nComponents are working correctly.")
+        print("You can now test with a real paper using:")
+        print("  python main.py --pdf <path_to_paper.pdf>")
+
+    except AssertionError as e:
+        print(f"\n✗ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n✗ Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    run_all_tests()

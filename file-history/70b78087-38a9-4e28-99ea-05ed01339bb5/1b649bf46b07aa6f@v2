@@ -1,0 +1,209 @@
+"""
+Paper Analyzer Module
+Use Claude API to analyze paper content and extract implementation details
+"""
+from anthropic import Anthropic
+from typing import Dict, Optional
+import json
+
+
+class PaperAnalyzer:
+    """Analyze paper using Claude API"""
+
+    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-20241022"):
+        """
+        Initialize paper analyzer
+
+        Args:
+            api_key: Anthropic API key
+            model: Claude model to use
+        """
+        self.client = Anthropic(api_key=api_key)
+        self.model = model
+
+    def analyze_paper(self, paper_text: str, paper_name: str = "Paper") -> Dict[str, any]:
+        """
+        Analyze paper and extract implementation details
+
+        Args:
+            paper_text: Full text of the paper
+            paper_name: Name/identifier for the paper
+
+        Returns:
+            Dictionary containing analysis results
+        """
+        prompt = f"""
+You are an expert machine learning researcher and engineer. Analyze the following ML paper to extract the exact information needed to reproduce the model implementation.
+
+Paper: {paper_name}
+
+Please extract and structure the following information:
+
+1. Model Architecture:
+   - Core components (layers, modules, connections)
+   - Input/output dimensions and shapes
+   - Layer sizes and parameters
+   - Special mechanisms (attention, normalization, etc.)
+
+2. Hyperparameters:
+   - All hyperparameters mentioned (learning rate, batch size, layers, hidden size, etc.)
+   - Optimizer settings
+   - Learning rate schedule
+   - Dropout rates
+   - Any other configuration settings
+
+3. Training Details:
+   - Loss function
+   - Training procedure
+   - Evaluation metrics
+   - Data preprocessing steps
+
+4. Implementation Dependencies:
+   - Required libraries/frameworks
+   - Key functions or operations
+
+Please provide your analysis in a structured format that can be directly used to generate implementation code. Be specific and precise with numbers and formulas.
+
+Paper text:
+{paper_text[:15000]}  # Limit text to avoid token limits
+
+Also extract the full methodology section if available:
+"""
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+
+            analysis_text = response.content[0].text
+
+            # Try to parse structured response
+            # If response contains JSON block, parse it
+            json_match = None
+            if "```json" in analysis_text:
+                start = analysis_text.find("```json") + 7
+                end = analysis_text.find("```", start)
+                if end != -1:
+                    json_match = analysis_text[start:end]
+            elif "```" in analysis_text:
+                start = analysis_text.find("```") + 3
+                end = analysis_text.find("```", start)
+                if end != -1:
+                    json_match = analysis_text[start:end]
+
+            if json_match:
+                try:
+                    parsed = json.loads(json_match)
+                    parsed["full_analysis_text"] = analysis_text
+                    return parsed
+                except json.JSONDecodeError:
+                    pass
+
+            # If no JSON found, return text analysis
+            return {
+                "architecture_description": analysis_text,
+                "hyperparameters": self._extract_hyperparameters(analysis_text),
+                "full_analysis_text": analysis_text,
+                "raw_response": analysis_text
+            }
+
+        except Exception as e:
+            print(f"Error analyzing paper: {e}")
+            return {
+                "error": str(e),
+                "architecture_description": "",
+                "hyperparameters": {}
+            }
+
+    def _extract_hyperparameters(self, analysis_text: str) -> Dict[str, any]:
+        """
+        Extract hyperparameters from analysis text
+
+        Args:
+            analysis_text: Text analysis from Claude
+
+        Returns:
+            Dictionary of hyperparameters
+        """
+        import re
+
+        hyperparams = {}
+
+        # Common hyperparameter patterns
+        patterns = {
+            "learning_rate": r"(learning rate|lr)[:\s]+([\d.e\-]+)",
+            "batch_size": r"(batch size)[:\s]+(\d+)",
+            "hidden_size": r"(hidden size|hidden dimension|d_model)[:\s]+(\d+)",
+            "num_layers": r"(num.*layers|n_layers)[:\s]+(\d+)",
+            "num_heads": r"(num.*heads|n_heads)[:\s]+(\d+)",
+            "dropout": r"(dropout)[:\s]+([\d.]+)",
+            "warmup_steps": r"(warmup)[:\s]+(\d+)",
+            "weight_decay": r"(weight decay)[:\s]+([\d.]+)",
+        }
+
+        for param_name, pattern in patterns.items():
+            match = re.search(pattern, analysis_text, re.IGNORECASE)
+            if match:
+                value = match.groups()[-1]
+                try:
+                    if '.' in value or 'e' in value.lower():
+                        hyperparams[param_name] = float(value)
+                    else:
+                        hyperparams[param_name] = int(value)
+                except ValueError:
+                    hyperparams[param_name] = value
+
+        return hyperparams
+
+    def extract_model_requirements(self, analysis: Dict[str, any]) -> Dict[str, any]:
+        """
+        Extract specific requirements for model implementation
+
+        Args:
+            analysis: Analysis results from analyze_paper
+
+        Returns:
+            Dictionary with implementation requirements
+        """
+        requirements = {
+            "model_type": "unknown",
+            "framework": "pytorch",
+            "input_shape": None,
+            "output_shape": None,
+            "components": [],
+            "hyperparameters": analysis.get("hyperparameters", {}),
+        }
+
+        # Try to identify model type from analysis
+        analysis_text = analysis.get("full_analysis_text", "") + analysis.get("architecture_description", "")
+
+        if "transformer" in analysis_text.lower():
+            requirements["model_type"] = "transformer"
+            requirements["components"] = [
+                "multi_head_attention",
+                "position_encoding",
+                "feed_forward",
+                "layer_normalization"
+            ]
+        elif "cnn" in analysis_text.lower() or "convolution" in analysis_text.lower():
+            requirements["model_type"] = "cnn"
+            requirements["components"] = [
+                "convolutional_layer",
+                "pooling_layer",
+                "batch_normalization"
+            ]
+        elif "rnn" in analysis_text.lower() or "lstm" in analysis_text.lower() or "gru" in analysis_text.lower():
+            requirements["model_type"] = "rnn"
+            requirements["components"] = [
+                "rnn_layer",
+                "embedding_layer"
+            ]
+
+        return requirements

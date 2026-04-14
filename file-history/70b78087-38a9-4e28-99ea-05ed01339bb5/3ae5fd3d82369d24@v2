@@ -1,0 +1,188 @@
+"""
+Data Handler Module
+Generate and manage synthetic datasets for model verification
+"""
+import torch
+from torch.utils.data import Dataset, DataLoader
+from typing import Tuple, Optional
+import random
+
+
+class SyntheticDataset(Dataset):
+    """Synthetic dataset for testing models"""
+
+    def __init__(self,
+                 num_samples: int = 1000,
+                 seq_length: int = 32,
+                 vocab_size: int = 10000,
+                 task_type: str = "copy"):
+        """
+        Initialize synthetic dataset
+
+        Args:
+            num_samples: Number of samples in dataset
+            seq_length: Length of each sequence
+            vocab_size: Size of vocabulary
+            task_type: Type of task ('copy', 'reverse', 'sort', 'shift')
+        """
+        self.num_samples = num_samples
+        self.seq_length = seq_length
+        self.vocab_size = vocab_size
+        self.task_type = task_type
+
+        # Generate data
+        self.data = self._generate_data()
+
+    def _generate_data(self) -> list:
+        """Generate synthetic data based on task type"""
+        data = []
+
+        for _ in range(self.num_samples):
+            # Generate random sequence (avoid padding token 0)
+            src = [random.randint(1, self.vocab_size - 1) for _ in range(self.seq_length)]
+
+            # Create target based on task type
+            if self.task_type == "copy":
+                tgt = src.copy()
+            elif self.task_type == "reverse":
+                tgt = src[::-1]
+            elif self.task_type == "sort":
+                tgt = sorted(src)
+            elif self.task_type == "shift":
+                # Shift by 1 position
+                tgt = src[1:] + [src[0]]
+            else:
+                tgt = src.copy()
+
+            # Add start and end tokens for target
+            tgt = [1] + tgt + [2]  # 1 = <sos>, 2 = <eos>
+
+            data.append((src, tgt))
+
+        return data
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, idx):
+        src, tgt = self.data[idx]
+        return torch.tensor(src, dtype=torch.long), torch.tensor(tgt, dtype=torch.long)
+
+
+class DataHandler:
+    """Handle data loading and preprocessing"""
+
+    def __init__(self,
+                 vocab_size: int = 10000,
+                 seq_length: int = 32,
+                 batch_size: int = 32,
+                 num_workers: int = 4):
+        """
+        Initialize data handler
+
+        Args:
+            vocab_size: Size of vocabulary
+            seq_length: Length of sequences
+            batch_size: Batch size for data loaders
+            num_workers: Number of workers for data loading
+        """
+        self.vocab_size = vocab_size
+        self.seq_length = seq_length
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+
+    def create_synthetic_loaders(self,
+                                  num_train: int = 10000,
+                                  num_val: int = 1000,
+                                  task_type: str = "copy") -> Tuple[DataLoader, DataLoader]:
+        """
+        Create training and validation data loaders
+
+        Args:
+            num_train: Number of training samples
+            num_val: Number of validation samples
+            task_type: Type of synthetic task
+
+        Returns:
+            Tuple of (train_loader, val_loader)
+        """
+        train_dataset = SyntheticDataset(
+            num_samples=num_train,
+            seq_length=self.seq_length,
+            vocab_size=self.vocab_size,
+            task_type=task_type
+        )
+
+        val_dataset = SyntheticDataset(
+            num_samples=num_val,
+            seq_length=self.seq_length,
+            vocab_size=self.vocab_size,
+            task_type=task_type
+        )
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True
+        )
+
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True
+        )
+
+        return train_loader, val_loader
+
+    def create_dummy_batch(self, batch_size: int = 2) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Create a dummy batch for testing
+
+        Args:
+            batch_size: Batch size
+
+        Returns:
+            Tuple of (src, tgt) tensors
+        """
+        src = torch.randint(1, self.vocab_size, (batch_size, self.seq_length))
+        tgt = torch.randint(1, self.vocab_size, (batch_size, self.seq_length + 2))  # +2 for sos/eos
+
+        return src, tgt
+
+    def get_vocab_info(self) -> dict:
+        """
+        Get vocabulary information
+
+        Returns:
+            Dictionary with vocab info
+        """
+        return {
+            "vocab_size": self.vocab_size,
+            "pad_token": 0,
+            "sos_token": 1,
+            "eos_token": 2,
+            "seq_length": self.seq_length,
+        }
+
+
+def collate_fn(batch):
+    """
+    Custom collate function for padding sequences
+
+    Args:
+        batch: List of (src, tgt) tuples
+
+    Returns:
+        Tuple of padded (src, tgt) tensors
+    """
+    src_batch, tgt_batch = zip(*batch)
+
+    # Pad sequences if needed (already same length for synthetic data)
+    src_batch = torch.nn.utils.rnn.pad_sequence(src_batch, batch_first=True, padding_value=0)
+    tgt_batch = torch.nn.utils.rnn.pad_sequence(tgt_batch, batch_first=True, padding_value=0)
+
+    return src_batch, tgt_batch

@@ -1,0 +1,271 @@
+# ML Paper Reproducer - 使用指南
+
+## 安装步骤
+
+### 1. 安装依赖
+
+```bash
+cd ml-paper-reproducer
+pip install -r requirements.txt
+```
+
+### 2. 配置 API 密钥
+
+```bash
+# 复制配置模板
+cp .env.example .env
+
+# 编辑 .env 文件，添加你的 Anthropic API Key
+# ANTHROPIC_API_KEY=your_actual_api_key_here
+```
+
+获取 API Key: https://console.anthropic.com/
+
+## 快速开始
+
+### 组件测试
+
+首先运行组件测试确保一切正常工作：
+
+```bash
+python tests/test_mvp.py
+```
+
+如果看到 "All Tests Passed! ✓"，说明所有组件都正常工作。
+
+### 使用真实论文
+
+准备好了吗？让我们来尝试复现一篇真实论文。
+
+#### 示例 1: Attention is All You Need
+
+首先你需要下载这篇论文：
+
+```bash
+# 方法1: 从 arXiv 下载
+wget https://arxiv.org/pdf/1706.03762.pdf -O attention.pdf
+
+# 方法2: 手动下载后放到项目目录
+# 将 attention.pdf 放到项目根目录
+```
+
+然后运行智能体：
+
+```bash
+# 基础运行
+python main.py --pdf attention.pdf
+
+# 自定义参数运行
+python main.py --pdf attention.pdf \
+    --epochs 10 \
+    --batch-size 64 \
+    --lr 0.0001 \
+    --task copy
+
+# 只测试不训练
+python main.py --pdf attention.pdf --test-only
+```
+
+#### 支持的任务类型
+
+- `copy`: 输入序列 -> 输出相同序列 (最简单)
+- `reverse`: 输入序列 -> 输出反向序列
+- `sort`: 随机序列 -> 排序后序列
+- `shift`: 序列向右移动一位
+
+## 工作流程
+
+智能体会自动执行以下步骤：
+
+1. **PDF 解析**: 从论文中提取文本和关键章节
+2. **论文分析**: 使用 Claude API 理解论文方法论
+3. **代码生成**: 生成 PyTorch 实现代码
+4. **模型构建**: 从代码实例化模型
+5. **数据准备**: 生成合成测试数据
+6. **模型测试**: 验证前向传播正常工作
+7. **模型训练**: 在合成任务上训练
+8. **报告生成**: 生成详细的实验报告
+
+## 输出文件
+
+生成的文件会保存在 `outputs/` 目录下：
+
+```
+outputs/
+├── generated_code/
+│   ├── model.py          # 生成的模型代码
+│   └── train.py          # 生成的训练代码
+├── reports/
+│   └── experiment_report_YYYYMMDD_HHMMSS/
+│       ├── report.md     # 详细实验报告
+│       └── training_curves.png  # 训练曲线图
+└── checkpoints/
+    ├── best_model.pt     # 最佳模型
+    ├── checkpoint_epoch_1.pt
+    ├── checkpoint_epoch_2.pt
+    └── training_history.json  # 训练历史数据
+```
+
+## 命令行参数详解
+
+```bash
+python main.py --pdf <论文PDF路径> [选项]
+```
+
+### 参数说明
+
+- `--pdf`: (必需) 论文 PDF 文件路径
+- `--epochs`: 训练轮数，默认 5
+- `--batch-size`: 批次大小，默认 32
+- `--lr`: 学习率，默认 0.0001
+- `--task`: 合成任务类型 (copy/reverse/sort/shift)，默认 copy
+- `--test-only`: 仅测试不训练，布尔标志
+- `--output-dir`: 输出目录，默认 outputs
+
+## 常见问题
+
+### 1. API Key 未设置
+
+**错误信息**: `Error: ANTHROPIC_API_KEY not set!`
+
+**解决方案**: 确保 `.env` 文件中正确设置了 API Key
+
+### 2. 模型训练很慢
+
+**原因**: 在 CPU 上训练可能较慢
+
+**解决方案**:
+- 如果有 GPU，确保安装了 GPU 版本的 PyTorch
+- 减少训练轮数 `--epochs 2`
+- 减少批次大小 `--batch-size 16`
+- 使用 `--test-only` 仅测试不训练
+
+### 3. 内存不足
+
+**解决方案**:
+- 减小批次大小 `--batch-size 16` 或 `8`
+- 减小序列长度 (修改 config.py 中的 SEQ_LENGTH)
+- 使用更小的模型 (让代码生成器生成较小的架构)
+
+### 4. PDF 解析失败
+
+**解决方案**:
+- 确保是标准的论文 PDF
+- 尝试从 arXiv 下载官方 PDF
+- 某些 PDF 可能需要手动提取关键信息
+
+## 高级用法
+
+### 1. 自定义配置
+
+编辑 `config.py` 来自定义默认参数：
+
+```python
+# Training settings
+BATCH_SIZE: int = 32
+LEARNING_RATE: float = 0.0001
+NUM_EPOCHS: int = 5
+
+# Synthetic task settings
+SEQ_LENGTH: int = 32      # 序列长度
+VOCAB_SIZE: int = 10000   # 词汇表大小
+NUM_SAMPLES: int = 1000   # 训练样本数
+```
+
+### 2. 使用生成的代码
+
+生成的代码可以直接在其他项目中使用：
+
+```python
+from outputs.generated_code.model import TransformerModel
+
+# 创建模型实例
+model = TransformerModel(
+    vocab_size=10000,
+    d_model=512,
+    nhead=8,
+    num_encoder_layers=6,
+    num_decoder_layers=6,
+    dim_feedforward=2048,
+    dropout=0.1
+)
+
+# 使用模型
+output = model(src, tgt)
+```
+
+### 3. 查看训练历史
+
+```python
+import json
+
+# 读取训练历史
+with open('outputs/checkpoints/training_history.json', 'r') as f:
+    history = json.load(f)
+
+print(f"Final training loss: {history['train_loss'][-1]}")
+print(f"Best validation loss: {min(history['val_loss'])}")
+```
+
+## 进阶功能（待实现）
+
+- [ ] 支持真实数据集（WMT、ImageNet 等）
+- [ ] 自动超参数调优
+- [ ] 与官方实现对比
+- [ ] 支持 TensorFlow 和 JAX
+- [ ] 注意力机制可视化
+- [ ] 多论文比较功能
+- [ ] 自动生成论文修订版
+
+## 故障排除
+
+### 检查环境
+
+```bash
+# 检查 Python 版本 (需要 3.8+)
+python --version
+
+# 检查 PyTorch 安装
+python -c "import torch; print(torch.__version__)"
+
+# 检查 GPU 可用性
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+```
+
+### 调试模式
+
+如果遇到问题，可以单独测试组件：
+
+```python
+from modules import PDFParser, PaperAnalyzer, CodeGenerator
+
+# 测试 PDF 解析
+with PDFParser("paper.pdf") as parser:
+    content = parser.parse()
+
+# 测试论文分析
+analyzer = PaperAnalyzer(api_key="your_key")
+analysis = analyzer.analyze_paper(content['full_text'])
+```
+
+## 贡献指南
+
+这是一个 MVP 项目，欢迎贡献！可以从以下方向开始：
+
+1. 添加对新架构的支持
+2. 改进数据集支持
+3. 优化代码生成质量
+4. 添加更多可视化功能
+5. 改进错误处理和日志记录
+
+## 许可证
+
+MIT License
+
+## 联系方式
+
+有问题或建议？欢迎提交 Issue 或 Pull Request！
+
+---
+
+享受自动复现 ML 论文的乐趣吧！🚀

@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""
+ML Paper Reproducer - Main CLI Tool
+Automatically reproduce ML papers from PDF to implementation
+"""
+import argparse
+import sys
+from pathlib import Path
+import torch
+
+from config import config
+from modules import (
+    PDFParser,
+    PaperAnalyzer,
+    CodeGenerator,
+    ModelBuilder,
+    DataHandler,
+    Trainer,
+    Reporter
+)
+
+
+def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(
+        description="ML Paper Reproducer - Automatically reproduce ML papers",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python main.py --pdf attention.pdf
+  python main.py --pdf attention.pdf --epochs 10 --task copy
+  python main.py --pdf attention.pdf --test-only
+        """
+    )
+
+    parser.add_argument(
+        "--pdf",
+        type=str,
+        required=True,
+        help="Path to the PDF paper file"
+    )
+
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+        help="Number of training epochs (default: 5)"
+    )
+
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Batch size for training (default: 32)"
+    )
+
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=0.0001,
+        help="Learning rate (default: 0.0001)"
+    )
+
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="copy",
+        choices=["copy", "reverse", "sort", "shift"],
+        help="Synthetic task type (default: copy)"
+    )
+
+    parser.add_argument(
+        "--test-only",
+        action="store_true",
+        help="Only test model forward pass, skip training"
+    )
+
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="outputs",
+        help="Output directory for generated files (default: outputs)"
+    )
+
+    args = parser.parse_args()
+
+    # Validate inputs
+    if not Path(args.pdf).exists():
+        print(f"Error: PDF file not found: {args.pdf}")
+        sys.exit(1)
+
+    # Validate API key
+    if not config.validate_api_key():
+        print("Error: ANTHROPIC_API_KEY not set!")
+        print("Please set your API key in .env file or environment variable")
+        sys.exit(1)
+
+    # Run the pipeline
+    try:
+        run_pipeline(args)
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\nError: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+def run_pipeline(args):
+    """Execute the full pipeline"""
+    print("=" * 70)
+    print("ML Paper Reproducer - Starting Pipeline")
+    print("=" * 70)
+    print(f"\nPaper: {args.pdf}")
+    print(f"Device: {config.get_device().upper()}")
+    print(f"Task: {args.task}")
+    print()
+
+    # Step 1: Parse PDF
+    print("Step 1: Parsing PDF...")
+    print("-" * 70)
+    with PDFParser(args.pdf) as parser:
+        parsed_content = parser.parse()
+
+    print(f"✓ Extracted {parsed_content['num_pages']} pages")
+    print(f"✓ Found {len(parsed_content['sections'])} sections")
+    print()
+
+    # Step 2: Analyze Paper
+    print("Step 2: Analyzing paper with Claude API...")
+    print("-" * 70)
+    analyzer = PaperAnalyzer(config.ANTHROPIC_API_KEY, config.CLAUDE_MODEL)
+    analysis = analyzer.analyze_paper(
+        parsed_content['full_text'],
+        paper_name=Path(args.pdf).stem
+    )
+
+    if "error" in analysis:
+        print(f"Error in paper analysis: {analysis['error']}")
+        sys.exit(1)
+
+    print(f"✓ Model type: {analysis.get('model_type', 'unknown')}")
+    print(f"✓ Extracted hyperparameters: {len(analysis.get('hyperparameters', {}))}")
+    print()
+
+    # Step 3: Generate Code
+    print("Step 3: Generating implementation code...")
+    print("-" * 70)
+    generator = CodeGenerator(config.ANTHROPIC_API_KEY, config.CLAUDE_MODEL)
+
+    # Generate model code
+    print("  Generating model code...")
+    model_code = generator.generate_model_code(analysis)
+
+    # Save generated code
+    code_dir = Path(args.output_dir) / "generated_code"
+    code_dir.mkdir(parents=True, exist_ok=True)
+    model_code_path = code_dir / "model.py"
+
+    with open(model_code_path, 'w') as f:
+        f.write(model_code)
+
+    print(f"✓ Model code saved to: {model_code_path}")
+
+    # Generate training code
+    print("  Generating training code...")
+    training_code = generator.generate_training_code(analysis)
+    training_code_path = code_dir / "train.py"
+
+    with open(training_code_path, 'w') as f:
+        f.write(training_code)
+
+    print(f"✓ Training code saved to: {training_code_path}")
+    print()
+
+    # Step 4: Build Model
+    print("Step 4: Building model from generated code...")
+    print("-" * 70)
+    builder = ModelBuilder(device=config.get_device())
+
+    try:
+        model = builder.build_from_code_file(str(model_code_path))
+        model_info = builder.get_model_info(model)
+
+        print(f"✓ Model instantiated successfully")
+        print(f"  Total parameters: {model_info['total_parameters']:,}")
+        print(f"  Device: {model_info['device']}")
+    except Exception as e:
+        print(f"Error building model: {e}")
+        print("Trying to test the generated code directly...")
+
+        # Try to import and test
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("model", model_code_path)
+        model_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(model_module)
+
+        # Get model class
+        model_class = getattr(model_module, "TransformerModel", None)
+        if model_class:
+            model = model_class()
+            model = model.to(config.get_device())
+            model_info = builder.get_model_info(model)
+            print(f"✓ Model loaded with fallback method")
+            print(f"  Total parameters: {model_info['total_parameters']:,}")
+        else:
+            print("Failed to load model")
+            sys.exit(1)
+
+    print()
+
+    # Step 5: Prepare Data
+    print("Step 5: Preparing synthetic dataset...")
+    print("-" * 70)
+    data_handler = DataHandler(
+        vocab_size=config.VOCAB_SIZE,
+        seq_length=config.SEQ_LENGTH,
+        batch_size=args.batch_size
+    )
+
+    train_loader, val_loader = data_handler.create_synthetic_loaders(
+        num_train=config.NUM_SAMPLES,
+        num_val=200,
+        task_type=args.task
+    )
+
+    print(f"✓ Created synthetic dataset")
+    print(f"  Training samples: {len(train_loader.dataset)}")
+    print(f"  Validation samples: {len(val_loader.dataset)}")
+    print(f"  Batch size: {args.batch_size}")
+    print()
+
+    # Step 6: Test Model
+    print("Step 6: Testing model forward pass...")
+    print("-" * 70)
+
+    src, tgt = data_handler.create_dummy_batch(batch_size=2)
+    src = src.to(config.get_device())
+    tgt = tgt.to(config.get_device())
+
+    try:
+        model.eval()
+        with torch.no_grad():
+            # Try forward pass
+            output = model(src, tgt)
+            print(f"✓ Forward pass successful")
+            print(f"  Input shape: {src.shape}")
+            print(f"  Output shape: {output.shape}")
+    except Exception as e:
+        print(f"✗ Forward pass failed: {e}")
+        print("Model may need adjustments. Check generated code.")
+        sys.exit(1)
+
+    print()
+
+    if args.test_only:
+        print("Test-only mode: skipping training")
+        print("=" * 70)
+        print("Pipeline completed successfully!")
+        return
+
+    # Step 7: Train Model
+    print("Step 7: Training model...")
+    print("-" * 70)
+    trainer = Trainer(
+        model=model,
+        device=config.get_device(),
+        learning_rate=args.lr,
+        save_dir=str(Path(args.output_dir) / "checkpoints")
+    )
+
+    trainer.setup_training(
+        optimizer="adam",
+        learning_rate=args.lr,
+        criterion="cross_entropy"
+    )
+
+    training_history = trainer.train(
+        train_loader=train_loader,
+        val_loader=val_loader,
+        num_epochs=args.epochs,
+        eval_interval=1
+    )
+
+    print()
+
+    # Step 8: Generate Report
+    print("Step 8: Generating experiment report...")
+    print("-" * 70)
+    reporter = Reporter(output_dir=str(Path(args.output_dir) / "reports"))
+
+    report_path = reporter.generate_report(
+        paper_name=Path(args.pdf).stem,
+        analysis=analysis,
+        training_history=training_history,
+        model_info=model_info,
+        hyperparams=analysis.get('hyperparameters', {})
+    )
+
+    print(f"✓ Report generated: {report_path}")
+    print()
+
+    # Summary
+    print("=" * 70)
+    print("Pipeline Completed Successfully!")
+    print("=" * 70)
+    print(f"\nGenerated files:")
+    print(f"  - Model code: {model_code_path}")
+    print(f"  - Training code: {training_code_path}")
+    print(f"  - Report: {report_path}")
+    print(f"  - Checkpoints: {Path(args.output_dir) / 'checkpoints'}")
+    print()
+
+    # Print final results
+    if training_history.get('train_loss'):
+        final_train_loss = training_history['train_loss'][-1]
+        print(f"Final training loss: {final_train_loss:.4f}")
+
+    if training_history.get('val_loss'):
+        final_val_loss = training_history['val_loss'][-1]
+        best_val_loss = min(training_history['val_loss'])
+        print(f"Final validation loss: {final_val_loss:.4f}")
+        print(f"Best validation loss: {best_val_loss:.4f}")
+
+    print("\n✓ All steps completed!")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,23 @@
+node_modules/
+.claude/skills
+test/expected/
+test/fixtures/
+
+# Rust
+ccq/target/
+
+# Downloaded binary
+bin/ccq
+
+# DuckDB static build
+duckdb-static/duckdb/
+duckdb-static/lib/
+duckdb-static/include/
+
+# Cross-compilation DuckDB libs
+duckdb-libs/
+
+# Zig build artifacts
+zig/zig-out/
+zig/zig-cache/
+zig/.zig-cache/

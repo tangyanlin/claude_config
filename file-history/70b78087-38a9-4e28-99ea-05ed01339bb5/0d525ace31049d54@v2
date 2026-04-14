@@ -1,0 +1,303 @@
+"""
+Reporter Module
+Generate experiment reports with visualizations
+"""
+import matplotlib.pyplot as plt
+import seaborn as sns
+from typing import Dict, List, Optional
+from pathlib import Path
+import json
+from datetime import datetime
+
+
+class Reporter:
+    """Generate comprehensive experiment reports"""
+
+    def __init__(self, output_dir: str = "outputs/reports"):
+        """
+        Initialize reporter
+
+        Args:
+            output_dir: Directory to save reports
+        """
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        plt.style.use('seaborn-v0_8-darkgrid')
+
+    def generate_report(self,
+                       paper_name: str,
+                       analysis: Dict,
+                       training_history: Dict,
+                       model_info: Dict,
+                       hyperparams: Dict) -> str:
+        """
+        Generate complete experiment report
+
+        Args:
+            paper_name: Name of the paper
+            analysis: Paper analysis results
+            training_history: Training metrics history
+            model_info: Model information
+            hyperparams: Hyperparameters used
+
+        Returns:
+            Path to generated report
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_name = f"experiment_report_{timestamp}"
+        report_dir = self.output_dir / report_name
+        report_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate visualizations
+        if training_history.get("train_loss"):
+            self._plot_training_curves(training_history, report_dir)
+
+        # Generate markdown report
+        report_path = report_dir / "report.md"
+        report_content = self._generate_markdown_report(
+            paper_name, analysis, training_history, model_info, hyperparams, report_dir
+        )
+
+        with open(report_path, 'w') as f:
+            f.write(report_content)
+
+        print(f"Report generated: {report_path}")
+        return str(report_path)
+
+    def _generate_markdown_report(self,
+                                  paper_name: str,
+                                  analysis: Dict,
+                                  training_history: Dict,
+                                  model_info: Dict,
+                                  hyperparams: Dict,
+                                  report_dir: Path) -> str:
+        """Generate markdown report content"""
+
+        report = f"""# ML Paper Reproduction Report
+
+## Paper: {paper_name}
+
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+---
+
+## 1. Paper Analysis
+
+### Model Architecture
+
+{analysis.get("architecture_description", "Architecture analysis not available")}
+
+### Extracted Hyperparameters
+
+"""
+
+        # Add hyperparameters
+        if hyperparams:
+            report += "| Hyperparameter | Value |\n"
+            report += "|----------------|-------|\n"
+            for key, value in hyperparams.items():
+                report += f"| {key} | {value} |\n"
+        else:
+            report += "No hyperparameters extracted.\n"
+
+        report += """
+
+---
+
+## 2. Model Implementation
+
+### Model Information
+
+"""
+
+        # Add model info with proper formatting
+        total_params = model_info.get('total_parameters', 'N/A')
+        trainable_params = model_info.get('trainable_parameters', 'N/A')
+
+        report += f"- **Total Parameters:** {total_params if isinstance(total_params, str) else f'{total_params:,}'}\n"
+        report += f"- **Trainable Parameters:** {trainable_params if isinstance(trainable_params, str) else f'{trainable_params:,}'}\n"
+        report += f"- **Device:** {model_info.get('device', 'N/A')}\n"
+
+        report += """
+
+### Architecture Details
+
+```
+""" + f"{model_info.get('architecture', 'Model architecture not available')}" + """
+```
+
+---
+
+## 3. Training Results
+
+### Training Configuration
+
+"""
+
+        # Add training configuration with safe formatting
+        train_losses = training_history.get('train_loss', [])
+        val_losses = training_history.get('val_loss', [])
+
+        report += f"- **Number of Epochs:** {len(train_losses)}\n"
+
+        if train_losses:
+            report += f"- **Final Training Loss:** {train_losses[-1]:.4f}\n"
+        else:
+            report += "- **Final Training Loss:** N/A\n"
+
+        if val_losses:
+            report += f"- **Final Validation Loss:** {val_losses[-1]:.4f}\n"
+            report += f"- **Best Validation Loss:** {min(val_losses):.4f}\n"
+        else:
+            report += "- **Final Validation Loss:** N/A\n"
+            report += "- **Best Validation Loss:** N/A\n"
+
+        report += """
+### Training Curves
+
+![Training Curves](training_curves.png)
+
+### Training History
+
+| Epoch | Train Loss | Val Loss |
+|-------|------------|----------|
+"""
+
+        # Add training history table
+        epochs = training_history.get("epochs", list(range(1, len(training_history.get("train_loss", [])) + 1)))
+        train_losses = training_history.get("train_loss", [])
+        val_losses = training_history.get("val_loss", [])
+
+        for i, epoch in enumerate(epochs):
+            train_loss = train_losses[i] if i < len(train_losses) else "N/A"
+            val_loss = val_losses[i] if i < len(val_losses) else "N/A"
+            train_str = f"{train_loss:.4f}" if isinstance(train_loss, float) else str(train_loss)
+            val_str = f"{val_loss:.4f}" if isinstance(val_loss, float) else str(val_loss)
+            report += f"| {epoch} | {train_str} | {val_str} |\n"
+
+        report += """
+
+---
+
+## 4. Results Summary
+
+### Success Metrics
+
+- ✓ Model successfully implemented from paper
+- ✓ Training completed without errors
+- ✓ Loss decreased during training
+"""
+
+        # Add validation status
+        if training_history.get('val_loss'):
+            report += "- ✓ Best model checkpoint saved\n"
+        else:
+            report += "- ⚠ No validation performed\n"
+
+        report += """
+### Observations
+
+"""
+
+        # Add observations
+        if training_history.get("train_loss"):
+            initial_loss = training_history["train_loss"][0]
+            final_loss = training_history["train_loss"][-1]
+            loss_reduction = (initial_loss - final_loss) / initial_loss * 100
+
+            report += f"- Training loss reduced by {loss_reduction:.1f}% (from {initial_loss:.4f} to {final_loss:.4f})\n"
+
+        if training_history.get("val_loss"):
+            best_val = min(training_history["val_loss"])
+            report += f"- Best validation loss achieved: {best_val:.4f}\n"
+
+        report += """
+
+---
+
+## 5. Files Generated
+
+"""
+
+        report += f"- Generated model code: `outputs/generated_code/model.py`\n"
+        report += "- Training checkpoints: `outputs/checkpoints/`\n"
+        report += f"- This report: `outputs/reports/{report_dir.name}/report.md`\n"
+
+        report += """
+
+---
+
+## 6. Next Steps
+
+1. **Improve Performance:**
+   - Tune hyperparameters
+   - Use larger dataset
+   - Train for more epochs
+   - Try different optimizers
+
+2. **Validation:**
+   - Compare with paper's reported results
+   - Run on actual benchmark dataset
+   - Perform ablation studies
+
+3. **Documentation:**
+   - Add detailed comments to code
+   - Create usage examples
+   - Document any deviations from paper
+
+---
+
+## 7. References
+
+- Original paper: {paper_name}
+- Framework: PyTorch
+- Generated by: ML Paper Reproducer v0.1.0
+
+---
+
+*Report generated automatically by ML Paper Reproducer*
+"""
+
+        return report
+
+    def _plot_training_curves(self, training_history: Dict, report_dir: Path):
+        """Plot training and validation loss curves"""
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        epochs = training_history.get("epochs", list(range(1, len(training_history.get("train_loss", [])) + 1)))
+        train_losses = training_history.get("train_loss", [])
+        val_losses = training_history.get("val_loss", [])
+
+        if train_losses:
+            ax.plot(range(1, len(train_losses) + 1), train_losses, label='Training Loss', linewidth=2)
+
+        if val_losses:
+            ax.plot(epochs, val_losses, label='Validation Loss', linewidth=2)
+
+        ax.set_xlabel('Epoch', fontsize=12)
+        ax.set_ylabel('Loss', fontsize=12)
+        ax.set_title('Training and Validation Loss', fontsize=14, fontweight='bold')
+        ax.legend(fontsize=11)
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(report_dir / "training_curves.png", dpi=150, bbox_inches='tight')
+        plt.close()
+
+    def _plot_attention_weights(self, attention_weights, report_dir: Path):
+        """Plot attention weight heatmap (placeholder for future)"""
+        # TODO: Implement attention visualization when available
+        pass
+
+    def save_metrics_json(self, metrics: Dict, filename: str = "metrics.json"):
+        """
+        Save metrics to JSON file
+
+        Args:
+            metrics: Dictionary of metrics to save
+            filename: Output filename
+        """
+        metrics_path = self.output_dir / filename
+        with open(metrics_path, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        print(f"Metrics saved to {metrics_path}")

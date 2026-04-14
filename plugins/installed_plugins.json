@@ -1,0 +1,45 @@
+{
+  "version": 2,
+  "plugins": {
+    "cc-query@cc-query-dev": [
+      {
+        "scope": "user",
+        "installPath": "/Users/tangyanlin/.claude/plugins/cache/cc-query-dev/cc-query/0.6.1",
+        "version": "0.6.1",
+        "installedAt": "2026-03-11T09:54:10.734Z",
+        "lastUpdated": "2026-03-11T09:54:10.734Z",
+        "gitCommitSha": "a5b79b153035a09ffcb371146961c720b9532b8d"
+      }
+    ],
+    "superpowers@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/tangyanlin/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7",
+        "version": "5.0.7",
+        "installedAt": "2026-03-27T09:10:02.805Z",
+        "lastUpdated": "2026-04-13T06:30:19.973Z",
+        "gitCommitSha": "eafe962b18f6c5dc70fb7c8cc7e83e61f4cdde06"
+      }
+    ],
+    "andrej-karpathy-skills@karpathy-skills": [
+      {
+        "scope": "user",
+        "installPath": "/Users/tangyanlin/.claude/plugins/cache/karpathy-skills/andrej-karpathy-skills/1.0.0",
+        "version": "1.0.0",
+        "installedAt": "2026-04-14T11:06:27.886Z",
+        "lastUpdated": "2026-04-14T11:06:27.886Z",
+        "gitCommitSha": "fb8fdb0aa74ccf587d2b666da7160e0d0eb94e6a"
+      }
+    ],
+    "everything-claude-code@everything-claude-code": [
+      {
+        "scope": "user",
+        "installPath": "/Users/tangyanlin/.claude/plugins/cache/everything-claude-code/everything-claude-code/1.10.0",
+        "version": "1.10.0",
+        "installedAt": "2026-04-14T11:36:26.576Z",
+        "lastUpdated": "2026-04-14T11:36:26.576Z",
+        "gitCommitSha": "e0ddb331f67bb5ddabeaf4874a28d54f4b3b836e"
+      }
+    ]
+  }
+}

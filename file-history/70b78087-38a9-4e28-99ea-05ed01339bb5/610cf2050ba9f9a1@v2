@@ -1,0 +1,7 @@
+"""
+ML Paper Reproducer - MVP
+A tool to automatically reproduce ML papers using AI agents
+"""
+
+__version__ = "0.1.0"
+__author__ = "AI Agent"

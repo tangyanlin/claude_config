@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Wave Pattern Animation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+        }
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            font-family: Arial, sans-serif;
+            text-align: center;
+            width: 100%;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div class="instructions">Move your mouse to interact with the waves</div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas to full window size
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Wave parameters
+        const waves = 8;
+        const waveSpeed = 0.02;
+        const waveAmplitude = 100;
+        const waveFrequency = 0.01;
+
+        // Mouse position
+        let mouseX = canvas.width / 2;
+        let mouseY = canvas.height / 2;
+
+        // Colors for gradient
+        const colors = [
+            '#ff00ff', '#8a2be2', '#4b0082', '#0000ff',
+            '#00ffff', '#00ff00', '#ffff00', '#ff7f00',
+            '#ff0000'
+        ];
+
+        // Track mouse movement
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // Animation loop
+        let time = 0;
+        function animate() {
+            // Clear canvas with fade effect
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Calculate center point
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            // Draw multiple waves
+            for (let i = 0; i < waves; i++) {
+                // Calculate wave parameters based on index
+                const waveIndex = i;
+                const waveOffset = (i / waves) * Math.PI * 2;
+                const colorIndex = Math.floor((i / waves) * colors.length);
+
+                // Create gradient
+                const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+                gradient.addColorStop(0, colors[colorIndex % colors.length]);
+                gradient.addColorStop(1, colors[(colorIndex + 1) % colors.length]);
+
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 3 + Math.sin(time * 0.5 + waveIndex) * 2;
+                ctx.globalAlpha = 0.8;
+
+                // Draw sine wave
+                ctx.beginPath();
+                for (let x = 0; x < canvas.width; x += 2) {
+                    // Calculate wave position based on mouse position
+                    const distanceToMouse = Math.sqrt(Math.pow(x - mouseX, 2) + Math.pow(mouseY - centerY, 2));
+                    const mouseInfluence = Math.sin(distanceToMouse * 0.01 + time + waveOffset) * 20;
+
+                    // Create wave pattern
+                    const y = centerY + Math.sin(x * waveFrequency + time + waveOffset) * waveAmplitude + mouseInfluence;
+
+                    if (x === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+            }
+
+            // Add some radial waves from mouse position
+            ctx.globalAlpha = 0.6;
+            for (let r = 0; r < 200; r += 10) {
+                ctx.beginPath();
+                ctx.arc(mouseX, mouseY, r + Math.sin(time * 2) * 10, 0, Math.PI * 2);
+                const gradient = ctx.createRadialGradient(mouseX, mouseY, r, mouseX, mouseY, r + 10);
+                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
+                gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            time += waveSpeed;
+            requestAnimationFrame(animate);
+        }
+
+        // Start animation
+        animate();
+    </script>
+</body>
+</html>

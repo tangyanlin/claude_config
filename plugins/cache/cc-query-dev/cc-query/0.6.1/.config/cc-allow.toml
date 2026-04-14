@@ -1,0 +1,15 @@
+# cc-query project config
+# Inherits from ~/.config/cc-allow.toml
+
+version = "2.0"
+
+[bash.allow]
+commands = ["path:$HOME/**/cc-query", "path:$PROJECT_ROOT/**", "just", "cargo", "zig", "make", "ar", "nm"]
+
+[[bash.ask.just.bump]]
+
+[read.allow]
+paths = ["path:$HOME/.local/log/cc-proxy/cc-proxy.log", "path:/usr/lib/zig/**", "path:$HOME/.cache/zig/**", "path:$HOME/code/cc-*/**"]
+
+[write.allow]
+paths = ["path:$HOME/.cache/zig/**"]

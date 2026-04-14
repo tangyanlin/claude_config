@@ -1,0 +1,184 @@
+"""
+Model Builder Module
+Dynamically load and instantiate models from generated code
+"""
+import torch
+import torch.nn as nn
+from typing import Optional, Dict, Any
+import importlib.util
+import sys
+from pathlib import Path
+import tempfile
+
+
+class ModelBuilder:
+    """Build PyTorch models from generated code"""
+
+    def __init__(self, device: str = "auto"):
+        """
+        Initialize model builder
+
+        Args:
+            device: Device to use ('auto', 'cuda', 'mps', 'cpu')
+        """
+        self.device = self._get_device(device)
+
+    def _get_device(self, device: str) -> str:
+        """Determine the best device to use"""
+        if device == "auto":
+            if torch.cuda.is_available():
+                return "cuda"
+            elif torch.backends.mps.is_available():
+                return "mps"
+            return "cpu"
+        return device
+
+    def build_from_code_file(self, code_path: str, model_class_name: str = "TransformerModel", **kwargs) -> nn.Module:
+        """
+        Build model from Python code file
+
+        Args:
+            code_path: Path to Python file containing model definition
+            model_class_name: Name of the model class to instantiate
+            **kwargs: Arguments to pass to model constructor
+
+        Returns:
+            Instantiated PyTorch model
+        """
+        # Load the module from file
+        spec = importlib.util.spec_from_file_location("generated_model", code_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["generated_model"] = module
+        spec.loader.exec_module(module)
+
+        # Get the model class
+        model_class = getattr(module, model_class_name, None)
+        if model_class is None:
+            raise ValueError(f"Model class '{model_class_name}' not found in {code_path}")
+
+        # Instantiate the model
+        model = model_class(**kwargs)
+
+        # Move to device
+        model = model.to(self.device)
+
+        return model
+
+    def build_from_code_string(self, code: str, model_class_name: str = "TransformerModel", **kwargs) -> nn.Module:
+        """
+        Build model from code string
+
+        Args:
+            code: Python code string containing model definition
+            model_class_name: Name of the model class to instantiate
+            **kwargs: Arguments to pass to model constructor
+
+        Returns:
+            Instantiated PyTorch model
+        """
+        # Write code to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+
+        try:
+            model = self.build_from_code_file(temp_path, model_class_name, **kwargs)
+        finally:
+            # Clean up temp file
+            Path(temp_path).unlink()
+
+        return model
+
+    def test_model(self, model: nn.Module, input_shape: tuple, output_shape: Optional[tuple] = None) -> bool:
+        """
+        Test if model can perform forward pass
+
+        Args:
+            model: PyTorch model
+            input_shape: Expected input shape (without batch dimension)
+            output_shape: Expected output shape (without batch dimension)
+
+        Returns:
+            True if model works, False otherwise
+        """
+        try:
+            model.eval()
+            with torch.no_grad():
+                # Create dummy input
+                dummy_input = torch.randint(0, 1000, (1, *input_shape)).to(self.device)
+                dummy_target = torch.randint(0, 1000, (1, *input_shape)).to(self.device)
+
+                # Forward pass
+                output = model(dummy_input, dummy_target)
+
+                # Check output shape if specified
+                if output_shape is not None:
+                    if output.shape[1:] != torch.Size(output_shape):
+                        print(f"Output shape mismatch: expected {output_shape}, got {output.shape[1:]}")
+                        return False
+
+                print(f"Model test passed! Output shape: {output.shape}")
+                return True
+
+        except Exception as e:
+            print(f"Model test failed: {e}")
+            return False
+
+    def count_parameters(self, model: nn.Module) -> int:
+        """
+        Count total trainable parameters in model
+
+        Args:
+            model: PyTorch model
+
+        Returns:
+            Number of trainable parameters
+        """
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    def get_model_info(self, model: nn.Module) -> Dict[str, Any]:
+        """
+        Get information about the model
+
+        Args:
+            model: PyTorch model
+
+        Returns:
+            Dictionary with model information
+        """
+        info = {
+            "total_parameters": self.count_parameters(model),
+            "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+            "device": str(next(model.parameters()).device),
+            "architecture": str(model),
+        }
+
+        return info
+
+    def save_model(self, model: nn.Module, save_path: str):
+        """
+        Save model state dict
+
+        Args:
+            model: PyTorch model
+            save_path: Path to save the model
+        """
+        torch.save(model.state_dict(), save_path)
+        print(f"Model saved to {save_path}")
+
+    def load_model(self, model: nn.Module, load_path: str) -> nn.Module:
+        """
+        Load model state dict
+
+        Args:
+            model: PyTorch model
+            load_path: Path to load the model from
+
+        Returns:
+            Model with loaded weights
+        """
+        state_dict = torch.load(load_path, map_location=self.device)
+        model.load_state_dict(state_dict)
+        model = model.to(self.device)
+        print(f"Model loaded from {load_path}")
+        return model

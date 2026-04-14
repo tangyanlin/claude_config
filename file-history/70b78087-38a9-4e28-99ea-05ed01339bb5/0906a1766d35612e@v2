@@ -1,0 +1,159 @@
+# ML Paper Reproducer
+
+A CLI tool that automatically reproduces machine learning papers by parsing PDFs, understanding the methodology, and generating working implementations.
+
+## Features
+
+- 📄 **PDF Parsing**: Extract text and key sections from ML papers
+- 🤖 **AI-Powered Analysis**: Use Claude API to understand paper methodology
+- 💻 **Code Generation**: Generate PyTorch implementation automatically
+- 🧪 **Synthetic Testing**: Verify implementation with synthetic tasks
+- 📊 **Training & Evaluation**: Train models and track metrics
+- 📈 **Automated Reports**: Generate comprehensive experiment reports
+
+## Installation
+
+1. Clone the repository:
+```bash
+cd ml-paper-reproducer
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Set up your Anthropic API key:
+```bash
+cp .env.example .env
+# Edit .env and add your API key
+```
+
+## Usage
+
+### Basic Usage
+
+```bash
+python main.py --pdf path/to/paper.pdf
+```
+
+### Advanced Options
+
+```bash
+python main.py --pdf attention.pdf \
+    --epochs 10 \
+    --batch-size 64 \
+    --lr 0.0001 \
+    --task copy
+```
+
+### Test Only (Skip Training)
+
+```bash
+python main.py --pdf attention.pdf --test-only
+```
+
+## Command Line Options
+
+- `--pdf`: Path to the PDF paper file (required)
+- `--epochs`: Number of training epochs (default: 5)
+- `--batch-size`: Batch size for training (default: 32)
+- `--lr`: Learning rate (default: 0.0001)
+- `--task`: Synthetic task type: copy, reverse, sort, shift (default: copy)
+- `--test-only`: Only test model forward pass, skip training
+- `--output-dir`: Output directory for generated files (default: outputs)
+
+## Project Structure
+
+```
+ml-paper-reproducer/
+├── main.py                 # CLI entry point
+├── config.py               # Configuration management
+├── modules/
+│   ├── pdf_parser.py       # PDF content extraction
+│   ├── paper_analyzer.py   # Claude API paper analysis
+│   ├── code_generator.py   # Code generation
+│   ├── model_builder.py    # Model instantiation
+│   ├── data_handler.py     # Synthetic data generation
+│   ├── trainer.py          # Training loop
+│   └── reporter.py         # Report generation
+├── outputs/
+│   ├── generated_code/     # Generated PyTorch code
+│   ├── reports/            # Experiment reports
+│   └── checkpoints/        # Model checkpoints
+└── tests/                  # Test files
+```
+
+## Workflow
+
+1. **PDF Parsing**: Extract text and sections from the paper
+2. **Paper Analysis**: Use Claude API to understand the methodology
+3. **Code Generation**: Generate PyTorch implementation
+4. **Model Building**: Instantiate the model from generated code
+5. **Data Preparation**: Create synthetic dataset for testing
+6. **Model Testing**: Verify forward pass works correctly
+7. **Training**: Train on synthetic task to verify convergence
+8. **Reporting**: Generate comprehensive experiment report
+
+## Example: Attention is All You Need
+
+To reproduce the Transformer paper:
+
+```bash
+# Download the paper (you'll need to get this yourself)
+# Example: wget https://arxiv.org/pdf/1706.03762.pdf -O attention.pdf
+
+# Run the reproducer
+python main.py --pdf attention.pdf --epochs 5 --task copy
+```
+
+This will:
+- Parse the Transformer architecture from the paper
+- Generate a PyTorch Transformer implementation
+- Test it on a copy task
+- Train for 5 epochs
+- Generate a report with results
+
+## Output Files
+
+- `outputs/generated_code/model.py`: Generated model implementation
+- `outputs/generated_code/train.py`: Generated training code
+- `outputs/reports/experiment_report_*/report.md`: Detailed experiment report
+- `outputs/checkpoints/best_model.pt`: Best model checkpoint
+
+## Requirements
+
+- Python 3.8+
+- PyTorch 2.0+
+- Anthropic API key
+- GPU recommended but not required
+
+## Limitations
+
+- MVP version focuses on synthetic tasks for quick validation
+- Real dataset support coming in future versions
+- Paper understanding may require manual verification
+- Complex architectures may need manual adjustments
+
+## Future Improvements
+
+- [ ] Support for real datasets (WMT, ImageNet, etc.)
+- [ ] Automatic hyperparameter tuning
+- [ ] Comparison with official implementations
+- [ ] Support for other frameworks (TensorFlow, JAX)
+- [ ] Attention visualization
+- [ ] Multi-paper comparison
+
+## License
+
+MIT License
+
+## Contributing
+
+This is an MVP project. Contributions welcome!
+
+## Acknowledgments
+
+- Built with Claude API for paper understanding
+- Uses PyTorch for model implementation
+- Inspired by Papers with Code
